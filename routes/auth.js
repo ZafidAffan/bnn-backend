@@ -5,7 +5,7 @@ const express = require('express');
 const router = express.Router();
 const mysql = require('mysql2');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 // ================= KONEKSI DATABASE =================
 const db = mysql.createConnection({
