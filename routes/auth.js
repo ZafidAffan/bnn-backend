@@ -8,12 +8,8 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
 // ================= KONEKSI DATABASE =================
-const db = mysql.createConnection({
-  host: 'localhost',
-  user: 'root',
-  password: '',
-  database: 'bnn_surat_2'
-});
+// Hapus blok mysql.createConnection yang lama, lalu ganti dengan ini di atas file Auth.js:
+const db = require('../config/db');
 
 db.connect(err => {
   if (err) throw err;
