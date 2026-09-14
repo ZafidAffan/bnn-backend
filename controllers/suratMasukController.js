@@ -2,14 +2,14 @@ const mysql = require('mysql2');
 const path = require('path');
 const axios = require('axios');
 
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxJygUqWh6KPuzbeEG-vkhF8hhDN0GF0r4XcQHSg2eeRNW8arjZjTmDv0HwsTja2DCZ/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby9LZupAqQrdJ4iNjFY43xulS_sUG2T6oLTzkPQuodYl6oVXBHuajrtk1h6BNY5VVA9/exec";
 const SHEET_SECRET = "BNN_SECRET_2026";
 // ================= KONEKSI DATABASE =================
 const db = require('../config/db');
 // ====================================================
 // CREATE SURAT MASUK
 // ====================================================
-exports.createSuratMasuk = (req, res) => {
+exports.createSuratMasuk = async (req, res) => {
   try {
     const {
       no_surat,
@@ -29,7 +29,39 @@ exports.createSuratMasuk = (req, res) => {
     }
 
     const kodeTracking = 'TRK-' + Date.now();
-    const filePath = `/uploads/${req.file.filename}`;
+    
+    // Konversi file buffer ke Base64 untuk dikirim ke Google Drive via Apps Script
+    const fileBase64 = req.file.buffer.toString('base64');
+    const fileName = req.file.originalname;
+    const fileMimeType = req.file.mimetype;
+
+    let fileUrl = '';
+
+    // Upload ke Google Drive & Google Sheets terlebih dahulu untuk mendapatkan URL
+    try {
+      const response = await axios.post(APPS_SCRIPT_URL, {
+        secret: SHEET_SECRET,
+        no_surat,
+        tanggal_surat,
+        tanggal_terima,
+        dari,
+        perihal,
+        jenis_surat,
+        status: "Menunggu",
+        kode_tracking: kodeTracking,
+        fileBase64,
+        fileName,
+        fileMimeType
+      });
+      
+      if (response.data && response.data.fileUrl) {
+        fileUrl = response.data.fileUrl;
+      }
+      console.log("Berhasil upload ke Google Drive & Sheets");
+    } catch (sheetError) {
+      console.error("Gagal sinkronisasi ke Google:", sheetError.message);
+      return res.status(500).json({ message: 'Gagal mengunggah file ke Google Drive' });
+    }
 
     const query = `
       INSERT INTO surat_masuk (
@@ -52,40 +84,20 @@ exports.createSuratMasuk = (req, res) => {
       dari,
       perihal,
       jenis_surat,
-      filePath,
+      fileUrl, // Menyimpan URL Google Drive ke database
       kodeTracking
     ];
 
-    db.query(query, values, async (err) => {
+    db.query(query, values, (err) => {
       if (err) {
         console.error('ERROR INSERT SURAT:', err);
-        return res.status(500).json({ message: 'Gagal menyimpan surat' });
+        return res.status(500).json({ message: 'Gagal menyimpan surat ke database' });
       }
-      // ================== KIRIM KE GOOGLE SHEETS ==================
-      try {
-        await axios.post(APPS_SCRIPT_URL, {
-          secret: SHEET_SECRET,
-          no_surat,
-          tanggal_surat,
-          tanggal_terima,
-          dari,
-          perihal,
-          jenis_surat,
-          status: "Menunggu",
-          kode_tracking: kodeTracking
-        });
-      
-        console.log("Berhasil kirim ke Google Sheets");
-      
-      } catch (sheetError) {
-        console.error("Gagal kirim ke Google Sheets:", sheetError.message);
-        // ⚠ Jangan return error ke user
-      }
-
 
       res.status(201).json({
         message: 'Surat masuk berhasil ditambahkan',
-        kode_tracking: kodeTracking
+        kode_tracking: kodeTracking,
+        file_url: fileUrl
       });
     });
   } catch (error) {
@@ -168,47 +180,84 @@ exports.getDetailSurat = (req, res) => {
 // ====================================================
 // UPDATE SURAT
 // ====================================================
-exports.updateSurat = (req, res) => {
-  const { id } = req.params;
-  const {
-    no_surat,
-    tanggal_surat,
-    tanggal_terima,
-    dari,
-    perihal,
-    jenis_surat,
-    status
-  } = req.body;
+exports.updateSurat = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      no_surat,
+      tanggal_surat,
+      tanggal_terima,
+      dari,
+      perihal,
+      jenis_surat,
+      status
+    } = req.body;
 
-  let query = `
-    UPDATE surat_masuk SET
-      no_surat = ?,
-      tanggal_surat = ?,
-      tanggal_terima = ?,
-      dari = ?,
-      perihal = ?,
-      jenis_surat = ?,
-      status = ?
-  `;
-  const values = [no_surat, tanggal_surat, tanggal_terima, dari, perihal, jenis_surat, status];
+    let fileUrl = null;
 
-  // jika ada file baru diupdate
-  if (req.file) {
-    query += `, file_surat = ?`;
-    values.push(`/uploads/${req.file.filename}`);
-  }
+    // Jika ada file PDF baru yang di-upload saat update
+    if (req.file) {
+      const fileBase64 = req.file.buffer.toString('base64');
+      const fileName = req.file.originalname;
+      const fileMimeType = req.file.mimetype;
 
-  query += ` WHERE id_surat = ?`;
-  values.push(id);
+      try {
+        const response = await axios.post(APPS_SCRIPT_URL, {
+          secret: SHEET_SECRET,
+          no_surat: no_surat || 'UPDATE_FILE',
+          tanggal_surat: '-',
+          tanggal_terima: '-',
+          dari: '-',
+          perihal: 'Update Lampiran File',
+          jenis_surat: '-',
+          status: status || 'Update',
+          kode_tracking: 'UPD-' + id,
+          fileBase64,
+          fileName,
+          fileMimeType
+        });
 
-  db.query(query, values, (err) => {
-    if (err) {
-      console.error('ERROR UPDATE SURAT:', err);
-      return res.status(500).json({ message: 'Gagal update surat' });
+        if (response.data && response.data.fileUrl) {
+          fileUrl = response.data.fileUrl;
+        }
+      } catch (sheetError) {
+        console.error("Gagal upload file baru ke Google Drive:", sheetError.message);
+        return res.status(500).json({ message: 'Gagal mengunggah file baru ke Google Drive' });
+      }
     }
 
-    res.json({ message: 'Surat berhasil diperbarui' });
-  });
+    let query = `
+      UPDATE surat_masuk SET
+        no_surat = ?,
+        tanggal_surat = ?,
+        tanggal_terima = ?,
+        dari = ?,
+        perihal = ?,
+        jenis_surat = ?,
+        status = ?
+    `;
+    const values = [no_surat, tanggal_surat, tanggal_terima, dari, perihal, jenis_surat, status];
+
+    if (fileUrl) {
+      query += `, file_surat = ?`;
+      values.push(fileUrl);
+    }
+
+    query += ` WHERE id_surat = ?`;
+    values.push(id);
+
+    db.query(query, values, (err) => {
+      if (err) {
+        console.error('ERROR UPDATE SURAT:', err);
+        return res.status(500).json({ message: 'Gagal update surat' });
+      }
+
+      res.json({ message: 'Surat berhasil diperbarui' });
+    });
+  } catch (error) {
+    console.error('SERVER ERROR UPDATE:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
 };
 
 // ====================================================

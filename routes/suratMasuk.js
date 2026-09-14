@@ -1,33 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
 
 const suratMasukController = require('../controllers/suratMasukController');
 const authMiddleware = require('../middleware/authMiddleware');
 
-// ================= MULTER CONFIG =================
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, Date.now() + ext);
-  }
-});
-
-const upload = multer({ storage });
+// ================= MULTER CONFIG (MEMORY STORAGE) =================
+// Menggunakan memoryStorage agar file dibaca sebagai buffer untuk dikirim ke Google Drive
+const upload = multer({ storage: multer.memoryStorage() });
 
 // =================================================
 // ROUTES SURAT MASUK
 // =================================================
 
-// ===== CREATE SURAT MASUK (UPLOAD PDF) =====
+// ===== CREATE SURAT MASUK (UPLOAD PDF KE GOOGLE DRIVE) =====
 router.post(
   '/',
   authMiddleware,
-  upload.single('file_surat'), // ⚠️ HARUS sama dengan frontend
+  upload.single('file_surat'), 
   suratMasukController.createSuratMasuk
 );
 
@@ -45,11 +35,11 @@ router.get(
   suratMasukController.getDetailSurat
 );
 
-// ===== UPDATE SURAT (BISA UPDATE FILE JUGA) =====
+// ===== UPDATE SURAT (BISA UPDATE FILE JUGA KE GOOGLE DRIVE) =====
 router.put(
   '/:id',
   authMiddleware,
-  upload.single('file_surat'), // opsional kalau mau update file
+  upload.single('file_surat'), 
   suratMasukController.updateSurat
 );
 
